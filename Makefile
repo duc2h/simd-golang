@@ -2,7 +2,7 @@
 TESTBIN := simdnorm.test
 FUNCS   := ^simdnorm\.(sumSquaresNEON|scaleNEON|sumSquaresScalar|scaleScalar)(\.abi0)?$$
 
-.PHONY: test proof bench asm compiler-asm profile amd64 clean
+.PHONY: test proof bench bench-amd64 asm compiler-asm profile amd64 clean
 
 ## test: vet (also checks the assembly's stack offsets) + all tests
 test:
@@ -16,6 +16,10 @@ proof:
 ## bench: SIMD vs scalar for different vector sizes
 bench:
 	go test -run '^$$' -bench . .
+
+## bench-amd64: same benchmarks for the AVX2 version (via Rosetta 2 on a Mac: timings are not real Intel speed)
+bench-amd64:
+	GOARCH=amd64 GOEXPERIMENT=simd go test -run '^$$' -bench . .
 
 ## asm: final machine code of the SIMD and scalar functions (arm64)
 asm:

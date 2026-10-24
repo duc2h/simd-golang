@@ -10,6 +10,10 @@ import (
 // L2-cache sized, and larger than cache (memory-bandwidth bound).
 var benchSizes = []int{3, 16, 128, 384, 1536, 65536, 1 << 22}
 
+// Normalize and sumSquares use whichever SIMD version was compiled in for this
+// GOARCH (NEON on arm64, AVX2 on amd64 with GOEXPERIMENT=simd). The benchmark
+// name shows which one, e.g. "simd-neon" or "simd-avx2".
+
 func benchVector(n int) []float32 {
 	return randomVector(rand.New(rand.NewPCG(11, 12)), n)
 }
@@ -19,7 +23,7 @@ func BenchmarkNormalize(b *testing.B) {
 		name string
 		fn   func([]float32) float32
 	}{
-		{"simd", Normalize},
+		{"simd-" + simdName(), Normalize},
 		{"scalar", NormalizeScalar},
 	}
 	for _, n := range benchSizes {
@@ -60,7 +64,7 @@ func BenchmarkSumSquares(b *testing.B) {
 		name string
 		fn   func([]float32) float32
 	}{
-		{"simd", sumSquares},
+		{"simd-" + simdName(), sumSquares},
 		{"scalar", sumSquaresScalar},
 		{"scalar-4acc", sumSquaresUnrolled},
 	}

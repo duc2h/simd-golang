@@ -19,6 +19,9 @@ const neonBlock = 16
 // Implementation describes the code path Normalize uses on this machine.
 func Implementation() string { return "arm64 NEON (hand-written assembly)" }
 
+// simdName is a short label for the SIMD code path, used in benchmark names.
+func simdName() string { return "neon" }
+
 // accumulatorLanes is the number of independent partial sums sumSquares keeps.
 func accumulatorLanes() int { return neonBlock }
 

@@ -24,6 +24,14 @@ func Implementation() string {
 	return "scalar (pure Go; CPU lacks AVX2)"
 }
 
+// simdName is a short label for the SIMD code path, used in benchmark names.
+func simdName() string {
+	if useAVX2 {
+		return "avx2"
+	}
+	return "scalar"
+}
+
 // accumulatorLanes is the number of independent partial sums sumSquares keeps.
 func accumulatorLanes() int {
 	if useAVX2 {

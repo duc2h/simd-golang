@@ -97,12 +97,12 @@ Measured on an Apple M4 with `make bench` (see [section 7.2](#72-make-bench-how-
 
 | How many numbers in the vector | Normal Go | SIMD version | Result |
 |---:|---:|---:|---|
-| 3 | 14.2 ns | 12.0 ns | no real difference (see below) |
-| 16 | 23.3 ns | 15.1 ns | 1.5× faster |
-| 128 | 168 ns | 25 ns | 6.6× faster |
-| 1536 | 2226 ns | 168 ns | 13× faster |
-| 65 536 | 91 µs | 7.6 µs | 12× faster |
-| 4 million | 4.54 ms | 0.49 ms | 9.3× faster |
+| 3 | 10.2 ns | 11.8 ns | no real difference (see below) |
+| 16 | 20.4 ns | 14.2 ns | 1.4× faster |
+| 128 | 139 ns | 23 ns | 6.1× faster |
+| 1536 | 1554 ns | 171 ns | 9.1× faster |
+| 65 536 | 66 µs | 7.4 µs | 8.9× faster |
+| 4 million | 4.50 ms | 0.48 ms | 9.4× faster |
 
 **Why no gain for 3 numbers?**
 The SIMD code works in groups of **16 numbers**. A 3-number vector does not
@@ -141,8 +141,38 @@ put all of them into one big list and process them together.
 | `simdproof_test.go` | checks that SIMD is **really** being used (see section 5) |
 | `bench_test.go` | measures speed |
 
-Go automatically picks the right file for your CPU. This is done with the
-file name ending (`_arm64`) and the `//go:build` line at the top of each file.
+### Only ONE SIMD version is inside each program
+
+Go chooses the files **when it builds the program**, not while it runs. It
+looks at the file name ending (`_arm64`) and the `//go:build` line at the top of
+each file, and **completely ignores** the files that don't match:
+
+| You build for | Files used | Files ignored |
+|---|---|---|
+| Mac / ARM (normal `go build` on your Mac) | `normalize.go`, `normalize_arm64.go`, `normalize_arm64.s` | `normalize_amd64_simd.go`, `normalize_other.go` |
+| Intel/AMD + `GOEXPERIMENT=simd` | `normalize.go`, `normalize_amd64_simd.go` | `normalize_arm64.go`, `normalize_arm64.s`, `normalize_other.go` |
+| anything else | `normalize.go`, `normalize_other.go` | all the SIMD files |
+
+You can ask Go to show this list:
+
+```sh
+go list -f '{{.GoFiles}} {{.SFiles}}' .                          # → [normalize.go normalize_arm64.go] [normalize_arm64.s]
+GOARCH=amd64 GOEXPERIMENT=simd go list -f '{{.GoFiles}}' .       # → [normalize.go normalize_amd64_simd.go]
+```
+
+**This is why `normalize_amd64_simd.go` looks "unused" on your Mac.** Your
+editor builds for your Mac, so it skips that file and may show it greyed out.
+It *is* used, but only in Intel/AMD builds.
+
+All 3 versions provide functions with the **same names**: `sumSquares()` and
+`scale()`. `Normalize()` simply calls `sumSquares()` and `scale()`. It does not
+know or care which version is inside:
+
+```
+Normalize()  →  sumSquares()  →  on Mac:   sumSquaresNEON()   (normalize_arm64.s)
+                              →  on Intel: sumSquaresAVX2()   (normalize_amd64_simd.go)
+                              →  others:   sumSquaresScalar() (normalize.go)
+```
 
 ### What the SIMD loop does (Mac version, simplified)
 
@@ -281,7 +311,8 @@ Long outputs are shortened with `...`.
 | `make proof` | All 3 proofs, as automatic tests | [7.5](#75-make-proof-all-3-proofs-as-automatic-tests) |
 | `make profile` | Where is the time spent? | [7.6](#76-make-profile-where-is-the-time-spent) |
 | `make amd64` | Does the Intel (AVX2) version work? | [7.7](#77-make-amd64-test-the-intel-version-on-a-mac) |
-| `make clean` | Delete the files the commands created | [7.8](#78-make-clean) |
+| `make bench-amd64` | How fast is the Intel (AVX2) version? | [7.8](#78-make-bench-amd64-speed-test-for-the-intel-version) |
+| `make clean` | Delete the files the commands created | [7.9](#79-make-clean) |
 
 ---
 
@@ -335,39 +366,45 @@ above a group of 16). This makes sure the "leftover numbers" code is correct.
 
 ```
 cpu: Apple M4
-BenchmarkNormalize/n=3/simd-10         	100080420	        11.96 ns/op	 1003.55 MB/s
-BenchmarkNormalize/n=3/scalar-10       	100000000	        14.24 ns/op	  842.94 MB/s
-BenchmarkNormalize/n=16/simd-10        	 66688120	        15.09 ns/op	 4241.62 MB/s
-BenchmarkNormalize/n=16/scalar-10      	 55008757	        23.26 ns/op	 2752.00 MB/s
-BenchmarkNormalize/n=128/simd-10       	 55504054	        25.46 ns/op	20108.00 MB/s
-BenchmarkNormalize/n=128/scalar-10     	  8025288	       168.2 ns/op	 3044.78 MB/s
+BenchmarkNormalize/n=3/simd-neon-10         	98894976	        11.76 ns/op	 1020.40 MB/s
+BenchmarkNormalize/n=3/scalar-10            	100000000	        10.22 ns/op	 1174.51 MB/s
+BenchmarkNormalize/n=16/simd-neon-10        	88171816	        14.16 ns/op	 4518.29 MB/s
+BenchmarkNormalize/n=16/scalar-10           	59701370	        20.39 ns/op	 3138.39 MB/s
+BenchmarkNormalize/n=128/simd-neon-10       	57029251	        22.62 ns/op	22634.08 MB/s
+BenchmarkNormalize/n=128/scalar-10          	 8142240	       138.8 ns/op	 3688.28 MB/s
 ...
-BenchmarkNormalize/n=1536/simd-10      	  7090184	       168.4 ns/op	36476.99 MB/s
-BenchmarkNormalize/n=1536/scalar-10    	   714932	      2226 ns/op	 2759.61 MB/s
+BenchmarkNormalize/n=1536/simd-neon-10      	 6965197	       170.8 ns/op	35975.58 MB/s
+BenchmarkNormalize/n=1536/scalar-10         	  782961	      1554 ns/op	 3953.93 MB/s
 ...
-BenchmarkSumSquares/n=1536/simd-10          	12566014	        96.39 ns/op
-BenchmarkSumSquares/n=1536/scalar-10        	 1000000	      1159 ns/op
-BenchmarkSumSquares/n=1536/scalar-4acc-10   	 3515949	       330.2 ns/op
+BenchmarkSumSquares/n=1536/simd-neon-10     	13122151	        93.20 ns/op
+BenchmarkSumSquares/n=1536/scalar-10        	 1000000	      1127 ns/op
+BenchmarkSumSquares/n=1536/scalar-4acc-10   	 3781520	       321.3 ns/op
 ```
+
+**Which SIMD is "simd"?** The name tells you: `simd-neon` = the Mac (ARM)
+assembly version. When you build for Intel/AMD, the same benchmark is called
+`simd-avx2` (see [7.8](#78-make-bench-amd64-speed-test-for-the-intel-version)).
+One program only contains one SIMD version (see section 4), so one benchmark
+run can never show NEON and AVX2 side by side.
 
 **How to read one line:**
 
 ```
-BenchmarkNormalize/n=1536/simd-10      7090184      168.4 ns/op     36476.99 MB/s
-        │            │     │   │          │              │                │
-        │            │     │   │          │              │                └ data processed per second
-        │            │     │   │          │              └ time for ONE Normalize call  ← the important one
-        │            │     │   │          └ how many times Go ran it to get a stable average
-        │            │     │   └ Go was allowed to use 10 CPU cores (the M4 has 10)
-        │            │     └ which version: simd or scalar (normal)
+BenchmarkNormalize/n=1536/simd-neon-10   6965197     170.8 ns/op     35975.58 MB/s
+        │            │       │      │       │             │                │
+        │            │       │      │       │             │                └ data processed per second
+        │            │       │      │       │             └ time for ONE Normalize call  ← the important one
+        │            │       │      │       └ how many times Go ran it to get a stable average
+        │            │       │      └ Go was allowed to use 10 CPU cores (the M4 has 10)
+        │            │       └ which version: simd-neon, simd-avx2, or scalar (normal)
         │            └ the vector has 1536 numbers
         └ the name of the speed test
 ```
 
 **What the results say:**
 
-1. **Big vectors:** for 1536 numbers, normal = 2226 ns, SIMD = 168 ns, so
-   SIMD is **13× faster**.
+1. **Big vectors:** for 1536 numbers, normal = 1554 ns, SIMD = 171 ns, so
+   SIMD is **9× faster**.
 2. **Tiny vectors:** for 3 numbers, both run the *same* normal loop (fewer than
    16 numbers, so there is no SIMD group). The difference is noise.
 3. **The `BenchmarkSumSquares` lines** show *where* the speedup comes from
@@ -375,9 +412,9 @@ BenchmarkNormalize/n=1536/simd-10      7090184      168.4 ns/op     36476.99 MB/
 
    | Version | Time | What it does |
    |---|---:|---|
-   | `scalar` | 1159 ns | normal Go, **1 total**. Each `+` must wait for the previous `+` to finish |
-   | `scalar-4acc` | 330 ns | normal Go, **4 separate totals**. The CPU can work on 4 additions at once → 3.5× faster, without SIMD! |
-   | `simd` | 96 ns | 4 registers × 4 lanes = **16 totals** → another 3.5× faster |
+   | `scalar` | 1127 ns | normal Go, **1 total**. Each `+` must wait for the previous `+` to finish |
+   | `scalar-4acc` | 321 ns | normal Go, **4 separate totals**. The CPU can work on 4 additions at once → 3.5× faster, without SIMD! |
+   | `simd-neon` | 93 ns | 4 registers × 4 lanes = **16 totals** → another 3.5× faster |
 
    **Lesson:** part of the gain comes simply from "not waiting". You can get
    that part in normal Go too. SIMD gives the rest.
@@ -707,7 +744,59 @@ the timing is not what a real Intel CPU would give.
 
 ---
 
-### 7.8 `make clean`
+### 7.8 `make bench-amd64`: speed test for the Intel version
+
+**Runs:** `GOARCH=amd64 GOEXPERIMENT=simd go test -run '^$' -bench . .`
+
+This is the same speed test as `make bench` (7.2), but built for Intel/AMD,
+so the "simd" row uses the AVX2 code (`sumSquaresAVX2`, `scaleAVX2`).
+On a Mac it runs through Rosetta.
+
+**Real output (shortened):**
+
+```
+goarch: amd64
+cpu: VirtualApple @ 2.50GHz
+BenchmarkNormalize/n=3/simd-avx2-10         	100000000	        11.75 ns/op
+BenchmarkNormalize/n=3/scalar-10            	100000000	        11.85 ns/op
+BenchmarkNormalize/n=128/simd-avx2-10       	 23655088	        50.85 ns/op
+BenchmarkNormalize/n=128/scalar-10          	 10381038	       114.1 ns/op
+BenchmarkNormalize/n=1536/simd-avx2-10      	  3787221	       321.6 ns/op
+BenchmarkNormalize/n=1536/scalar-10         	   834561	      1316 ns/op
+...
+BenchmarkSumSquares/n=1536/simd-avx2-10     	  8241314	       143.9 ns/op
+BenchmarkSumSquares/n=1536/scalar-10        	  1386990	       864.0 ns/op
+BenchmarkSumSquares/n=1536/scalar-4acc-10   	  3452534	       357.1 ns/op
+```
+
+**How to read it:**
+
+- `goarch: amd64` → this program was built for Intel/AMD.
+- `cpu: VirtualApple @ 2.50GHz` → not a real Intel CPU. This is **Rosetta**
+  pretending to be one.
+- `simd-avx2` → the "simd" rows now use the **AVX2** code.
+
+**What the results say:**
+
+| 1536 numbers | Normal Go | SIMD | Speedup |
+|---|---:|---:|---:|
+| Mac build (NEON, from 7.2) | 1554 ns | 171 ns | 9.1× |
+| Intel build under Rosetta (AVX2) | 1316 ns | 322 ns | 4.1× |
+
+- Even under Rosetta, AVX2 is about **4× faster** than normal code.
+- **Do not compare the AVX2 numbers with the NEON numbers.** Rosetta has to
+  translate every Intel command into Mac commands while the program runs. Your
+  Mac's SIMD registers hold 4 numbers, so each 8-number AVX2 command most likely
+  becomes several Mac commands. On a real Intel/AMD CPU the numbers would be
+  different, probably better.
+
+**✅ Proves:** the AVX2 version is faster than normal code, measured in the same conditions.
+**❌ Does not prove:** how fast it is on a real Intel/AMD CPU. For that, run
+`GOEXPERIMENT=simd go test -run '^$' -bench .` on a real Intel/AMD machine (see section 8).
+
+---
+
+### 7.9 `make clean`
 
 **Runs:** `rm -f simdnorm.test cpu.pprof`
 
@@ -754,6 +843,7 @@ AVX: true   AVX2: true   FMA: false   AVX512: false
 |---|---|---|
 | Mac SIMD (NEON) | ✅ yes, real speed | `make test`, `make proof`, `make bench` |
 | Intel AVX2: correctness + proofs | ✅ yes, through Rosetta | `make amd64` |
+| Intel AVX2: rough speed (SIMD vs normal) | ✅ yes, through Rosetta | `make bench-amd64` |
 | Intel AVX2: real speed | ❌ no | Rosetta speed is not real Intel speed |
 | Intel AVX-512 | ❌ no | Rosetta does not support AVX-512 |
 

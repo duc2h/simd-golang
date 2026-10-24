@@ -7,6 +7,9 @@ package simdnorm
 // Implementation describes the code path Normalize uses on this machine.
 func Implementation() string { return "scalar (pure Go)" }
 
+// simdName is a short label for the code path, used in benchmark names.
+func simdName() string { return "scalar" }
+
 func accumulatorLanes() int { return 1 }
 
 func sumSquares(v []float32) float32 { return sumSquaresScalar(v) }
